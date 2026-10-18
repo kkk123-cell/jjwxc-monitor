@@ -19,25 +19,23 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# 全局 CSS 美化 & 移动端字体缩小
 st.markdown("""
 <style>
     html, body, [class*="css"] { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; }
-    [data-testid="stMetric"] {
-        background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f2 100%);
-        border-radius: 12px; padding: 15px 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-    }
-    [data-testid="stMetric"] label { color: #555; font-weight: 500; }
-    [data-testid="stMetric"] div { color: #1f77b4; font-weight: 700; }
-    .stButton > button { border-radius: 8px; font-weight: 600; transition: all 0.3s ease; }
-    .stButton > button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-    [data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-    [data-testid="stSidebar"] { background: linear-gradient(180deg, #f8f9fa 0%, #eef2f5 100%); }
-    h1 { background: linear-gradient(90deg, #1f77b4, #ff7f0e); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; }
+    /* 缩小表格字体，适配手机 */
+    [data-testid="stDataFrame"] { font-size: 13px !important; border-radius: 8px; }
+    [data-testid="stDataFrame"] th { font-size: 13px !important; padding: 6px !important; }
+    [data-testid="stDataFrame"] td { font-size: 13px !important; padding: 6px !important; }
+    /* 侧边栏美化 */
+    [data-testid="stSidebar"] { background: #f8f9fa; }
+    /* 整体标题缩小一点 */
+    h1 { font-size: 24px !important; margin-bottom: 10px; }
+    h3 { font-size: 18px !important; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("📚 晋江数据监测助手")
-st.caption("全功能云端版 · 自动后台抓取 · 支持PC/APP/WAP全榜单")
 
 # ================= 云端读写核心 =================
 try:
@@ -96,7 +94,7 @@ def delete_record(id_col, target_id, file_path, source_col=None, source_val=None
             df = df[df[id_col].astype(str) != str(target_id)]
         save_df(df, file_path)
 
-# ================= 爬虫模块（暴力加强版） =================
+# ================= 爬虫模块 =================
 src_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 def fetch_book_data(novel_id):
@@ -111,13 +109,11 @@ def fetch_book_data(novel_id):
         collect_tag = soup.find('span', itemprop='collectedCount')
         author_tag = soup.find('span', itemprop='author')
         
-        if not title_tag or not collect_tag:
-            return None
+        if not title_tag or not collect_tag: return None
 
         clicks = 0
         click_tag = soup.find('span', itemprop='clickCount')
-        if click_tag: 
-            clicks = int(re.sub(r'\D', '', click_tag.text))
+        if click_tag: clicks = int(re.sub(r'\D', '', click_tag.text))
         else:
             click_match = re.search(r'点击数[：:\s]*(\d+)', text_all)
             if click_match: clicks = int(click_match.group(1))
@@ -127,12 +123,9 @@ def fetch_book_data(novel_id):
         if vip_match: vip_ticket = int(float(vip_match.group(1)))
 
         return {
-            "书号": str(novel_id), 
-            "书名": title_tag.text.strip(), 
-            "收藏数": int(collect_tag.text.strip()),
-            "作者": author_tag.text.strip() if author_tag else "未知",
-            "点击数": clicks, 
-            "霸王票": vip_ticket
+            "书号": str(novel_id), "书名": title_tag.text.strip(), 
+            "收藏数": int(collect_tag.text.strip()), "作者": author_tag.text.strip() if author_tag else "未知",
+            "点击数": clicks, "霸王票": vip_ticket
         }
     except Exception: return None
 
@@ -159,8 +152,7 @@ def fetch_chapter_clicks(novel_id):
         resp = requests.get(api_url, headers=src_headers, timeout=10)
         resp.encoding = 'gb18030'
         json_match = re.search(r'novelclick\((.*)\)', resp.text)
-        if json_match:
-            return {int(k): int(v) for k, v in json.loads(json_match.group(1)).items()}
+        if json_match: return {int(k): int(v) for k, v in json.loads(json_match.group(1)).items()}
     except: pass
     return None
 
@@ -180,7 +172,7 @@ def fetch_ranking_books(orderstr, t="0"):
         return books[:20]
     except: return None
 
-# ================= 涨跌幅计算（修复报错） =================
+# ================= 涨跌幅计算 =================
 def get_current_cycle_start():
     now = datetime.now()
     days_since_thursday = (now.weekday() - 3) % 7
@@ -192,15 +184,11 @@ def get_current_cycle_start():
 def calculate_metrics(df, id_col, val_col):
     if df.empty: return df
     df = df.copy()
-    
-    # 强制转数字，防止字符串相减报错
     df[val_col] = pd.to_numeric(df[val_col], errors='coerce')
     df = df.dropna(subset=[val_col])
     if df.empty: return df
-    
     df['时间_dt'] = pd.to_datetime(df['记录时间'], errors='coerce')
-    df = df.dropna(subset=['时间_dt'])
-    df = df.sort_values(by=[id_col, '时间_dt'])
+    df = df.dropna(subset=['时间_dt']).sort_values(by=[id_col, '时间_dt'])
     
     latest_df = df.drop_duplicates(subset=[id_col], keep='last').copy()
     cycle_start = get_current_cycle_start()
@@ -211,30 +199,17 @@ def calculate_metrics(df, id_col, val_col):
         hist = df[df[id_col] == item_id]
         past_any = hist[hist['时间_dt'] < latest_time]
         
-        # 1H 涨幅
         target_1h = latest_time - timedelta(hours=1)
         past_1h = hist[hist['时间_dt'] <= target_1h]
-        if not past_1h.empty:
-            base_1h = past_1h.iloc[-1][val_col]
-        elif not past_any.empty:
-            base_1h = past_any.iloc[-1][val_col] # 没有1小时前，找最近的旧数据
-        else:
-            base_1h = None
+        base_1h = past_1h.iloc[-1][val_col] if not past_1h.empty else (past_any.iloc[-1][val_col] if not past_any.empty else None)
             
-        # 本周涨幅
         cycle_data = hist[hist['时间_dt'] >= cycle_start]
-        if not cycle_data.empty:
-            base_cycle = cycle_data.iloc[0][val_col]
-        elif not past_any.empty:
-            base_cycle = past_any.iloc[-1][val_col]
-        else:
-            base_cycle = None
+        base_cycle = cycle_data.iloc[0][val_col] if not cycle_data.empty else (past_any.iloc[-1][val_col] if not past_any.empty else None)
             
         row_dict = row.to_dict()
         row_dict['1H涨幅'] = (latest_val - base_1h) if base_1h is not None else None
         row_dict['本周涨幅'] = (latest_val - base_cycle) if base_cycle is not None else None
         results.append(row_dict)
-        
     return pd.DataFrame(results)
 
 # ================= 全榜单配置 =================
@@ -286,7 +261,7 @@ with st.sidebar:
         df_books_now = load_df(FILE_BOOK)
         if not df_books_now.empty:
             unique_books = df_books_now.drop_duplicates('书号', keep='last')
-            with st.spinner("正在重新抓取所有书籍..."):
+            with st.spinner("正在重新抓取..."):
                 for _, row in unique_books.iterrows():
                     nid = str(row['书号'])
                     info = fetch_book_data(nid)
@@ -309,27 +284,27 @@ if app_mode == "📚 书架":
         if not manual_df.empty:
             latest = calculate_metrics(manual_df, '书号', '收藏数')
             if not latest.empty:
-                c1, c2, c3, c4, c5, c6 = st.columns([3, 2, 1.5, 1.5, 1.5, 1])
-                c1.markdown("**书籍名称**"); c2.markdown("**作者**"); c3.markdown("**收藏数**"); c4.markdown("**1H涨幅**"); c5.markdown("**本周涨幅**"); c6.markdown("**操作**")
-                st.markdown("---")
-                for _, row in latest.iterrows():
-                    col1, col2, col3, col4, col5, col6 = st.columns([3, 2, 1.5, 1.5, 1.5, 1])
-                    col1.write(row['书名']); col2.write(row['作者']); col3.write(row['收藏数'])
-                    
-                    g1h = row['1H涨幅']
-                    col4.write("-" if pd.isna(g1h) else (f"+{int(g1h)}" if g1h > 0 else str(int(g1h))))
-                        
-                    gw = row['本周涨幅']
-                    col5.write("-" if pd.isna(gw) else (f"+{int(gw)}" if gw > 0 else str(int(gw))))
-                        
-                    if col6.button("❌", key=f"delb{row['书号']}"):
-                        delete_record('书号', row['书号'], FILE_BOOK); st.rerun()
+                # 格式化数据
+                view_df = latest[['书名', '作者', '收藏数', '1H涨幅', '本周涨幅']].copy()
+                view_df['1H涨幅'] = view_df['1H涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
+                view_df['本周涨幅'] = view_df['本周涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
+                
+                # 展示紧凑表格
+                st.dataframe(view_df, use_container_width=True, hide_index=True)
+                
+                # 删除操作区
+                st.markdown("##### 🗑️ 删除书籍")
+                del_options = latest['书名'] + " (" + latest['书号'].astype(str) + ")"
+                sel_del = st.selectbox("选择要删除的书籍", ["请选择..."] + del_options.tolist(), label_visibility="collapsed")
+                if sel_del != "请选择...":
+                    if st.button("确认删除该书"):
+                        del_id = sel_del.split("(")[-1].strip(")")
+                        delete_record('书号', del_id, FILE_BOOK)
+                        st.success("已删除"); time.sleep(1); st.rerun()
 
 # ================= 页面 2：全榜单监控 =================
 elif app_mode == "🏆 全榜单监控":
-    st.subheader("🏆 全榜单实时监控")
-    st.info("💡 数据由后台每小时自动抓取并更新，无需手动操作，打开即可查看最新榜单。")
-    
+    st.subheader("🏆 全榜单监控")
     sel_rank = st.selectbox("选择榜单", list(RANK_MAP.keys()))
     
     df_rank = load_df(FILE_RANK)
@@ -338,61 +313,70 @@ elif app_mode == "🏆 全榜单监控":
         if not cur.empty:
             lat = calculate_metrics(cur, '书号', '收藏数')
             if not lat.empty:
-                st.metric(label="榜单本周平均涨幅", value=f"{lat['本周涨幅'].mean():.2f}" if pd.notna(lat['本周涨幅'].mean()) else "0")
-                st.dataframe(lat[['书名', '作者', '收藏数', '1H涨幅', '本周涨幅']].sort_values('本周涨幅', ascending=False), use_container_width=True, hide_index=True)
-            else:
-                st.info("暂无有效数据。")
+                view_rank = lat[['书名', '作者', '收藏数', '1H涨幅', '本周涨幅']].copy()
+                view_rank['1H涨幅'] = view_rank['1H涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
+                view_rank['本周涨幅'] = view_rank['本周涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
+                view_rank = view_rank.sort_values('本周涨幅', ascending=False)
+                
+                st.markdown(f"**本周平均涨幅**: {lat['本周涨幅'].mean():.2f}")
+                st.dataframe(view_rank, use_container_width=True, hide_index=True)
         else:
-            st.info(f"暂无【{sel_rank}】的数据，后台任务运行后将自动填充。")
+            st.info(f"暂无【{sel_rank}】的数据。")
 
 # ================= 页面 3：作者专栏 =================
 elif app_mode == "👤 作者专栏":
-    st.subheader("👤 作者作收监控")
+    st.subheader("👤 作者作收")
     df_auth = load_df(FILE_AUTHOR)
     if not df_auth.empty:
         lat_a = calculate_metrics(df_auth, '作者ID', '专栏收藏数')
         if not lat_a.empty:
-            for _, row in lat_a.iterrows():
-                c1, c2, c3, c4, c5 = st.columns([3, 1.5, 1.5, 1.5, 1])
-                c1.markdown(f"**👤 {row['作者']}**"); c2.write(f"作收:{row['专栏收藏数']}")
+            # 作者列表表格化
+            view_auth = lat_a[['作者', '专栏收藏数', '1H涨幅', '本周涨幅']].copy()
+            view_auth['1H涨幅'] = view_auth['1H涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
+            view_auth['本周涨幅'] = view_auth['本周涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
+            
+            st.dataframe(view_auth, use_container_width=True, hide_index=True)
+            
+            # 操作区（展开作品和删除）
+            st.markdown("##### 📖 查看作品与删除")
+            auth_options = lat_a['作者'] + " (" + lat_a['作者ID'].astype(str) + ")"
+            sel_auth = st.selectbox("选择作者", ["请选择..."] + auth_options.tolist(), label_visibility="collapsed")
+            
+            if sel_auth != "请选择...":
+                target_a_name = sel_auth.split(" (")[0]
+                target_a_id = sel_auth.split("(")[-1].strip(")")
                 
-                g1h = row['1H涨幅']
-                c3.write(f"1H:{int(g1h)}" if pd.notna(g1h) else "1H:-")
+                # 作品详情
+                df_b = load_df(FILE_BOOK)
+                ab = df_b[df_b['来源'] == f"作者专栏: {target_a_name}"]
+                if not ab.empty:
+                    lb = calculate_metrics(ab, '书号', '收藏数')
+                    view_b = lb[['书名', '收藏数', '1H涨幅', '本周涨幅']].copy()
+                    view_b['1H涨幅'] = view_b['1H涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
+                    view_b['本周涨幅'] = view_b['本周涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
+                    st.markdown(f"**{target_a_name} 的作品**：")
+                    st.dataframe(view_b, use_container_width=True, hide_index=True)
+                else:
+                    st.info("该作者暂无作品数据")
                 
-                gw = row['本周涨幅']
-                c4.write(f"周:{int(gw)}" if pd.notna(gw) else "周:-")
-                
-                if c5.button("❌", key=f"dela{row['作者ID']}"):
-                    delete_record('作者ID', row['作者ID'], FILE_AUTHOR)
-                    delete_record('来源', f"作者专栏: {row['作者']}", FILE_BOOK, '来源', f"作者专栏: {row['作者']}")
-                    st.rerun()
-                with st.expander("作品详情"):
-                    df_b = load_df(FILE_BOOK)
-                    ab = df_b[df_b['来源'] == f"作者专栏: {row['作者']}"]
-                    if not ab.empty:
-                        lb = calculate_metrics(ab, '书号', '收藏数')
-                        st.dataframe(lb[['书名', '收藏数', '1H涨幅', '本周涨幅']], use_container_width=True, hide_index=True)
+                if st.button("🚨 删除该作者及所有作品", type="primary"):
+                    delete_record('作者ID', target_a_id, FILE_AUTHOR)
+                    delete_record('来源', f"作者专栏: {target_a_name}", FILE_BOOK, '来源', f"作者专栏: {target_a_name}")
+                    st.success("已删除"); time.sleep(1); st.rerun()
 
 # ================= 页面 4：单书详情 =================
 elif app_mode == "🔍 单书详情":
-    st.subheader("🔍 单本小说数据剖面")
+    st.subheader("🔍 单书详情")
     df_books = load_df(FILE_BOOK)
     if not df_books.empty:
         book_options = df_books.drop_duplicates('书号', keep='last')
-        book_select = st.selectbox("选择要查看的书籍", book_options['书名'] + " (" + book_options['书号'].astype(str) + ")")
+        book_select = st.selectbox("选择书籍", book_options['书名'] + " (" + book_options['书号'].astype(str) + ")")
         if book_select:
             target_id = book_select.split("(")[-1].strip(")")
-            target_df = df_books[df_books['书号'].astype(str) == target_id]
-            if not target_df.empty:
-                latest = target_df.iloc[-1]
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("当前收藏", latest['收藏数']); c2.metric("当前总点击", latest['点击数'])
-                c3.metric("霸王票估算", f"{latest['霸王票']} RMB"); c4.metric("作者", latest['作者'])
             
             st.markdown("---")
-            st.markdown("### 📖 章节点击与留存")
             if st.button("抓取最新章节数据"):
-                with st.spinner("正在获取章节数据..."):
+                with st.spinner("获取数据中..."):
                     chap_data = fetch_chapter_clicks(target_id)
                     if chap_data:
                         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -401,7 +385,7 @@ elif app_mode == "🔍 单书详情":
                             records.append({"记录时间": now, "书号": target_id, "章节": f"第{chap_no}章", "点击": clicks})
                         df_chap_old = load_df(FILE_CHAPTER)
                         save_df(pd.concat([df_chap_old, pd.DataFrame(records)], ignore_index=True), FILE_CHAPTER)
-                        st.success("章节数据抓取完毕"); st.rerun()
+                        st.success("抓取成功"); st.rerun()
 
             df_chap = load_df(FILE_CHAPTER)
             if not df_chap.empty:
@@ -417,18 +401,21 @@ elif app_mode == "🔍 单书详情":
                     latest_chapter = latest_chap.iloc[-1]
                     first_chapter_click = latest_chap.iloc[0]['点击']
                     
-                    st.markdown(f"#### 🔍 核心数据")
-                    col_a, col_b, col_c = st.columns(3)
+                    # 紧凑型数据展示
+                    c1, c2, c3 = st.columns(3)
                     if len(first_3) >= 3:
                         retention_3 = (first_3[first_3['章节号'] == 3]['点击'].values[0] / first_3[first_3['章节号'] == 1]['点击'].values[0]) * 100
-                        col_a.metric("前三章留存率", f"{retention_3:.2f}%")
+                        c1.markdown(f"<div style='font-size:12px; color:#888;'>前三章留存</div><div style='font-size:16px; font-weight:bold; color:#1f77b4;'>{retention_3:.2f}%</div>", unsafe_allow_html=True)
                     else:
-                        col_a.metric("前三章留存率", "数据不足")
+                        c1.markdown(f"<div style='font-size:12px; color:#888;'>前三章留存</div><div style='font-size:16px; font-weight:bold; color:#1f77b4;'>数据不足</div>", unsafe_allow_html=True)
+                    
                     retention_latest = (latest_chapter['点击'] / first_chapter_click) * 100 if first_chapter_click > 0 else 0
-                    col_b.metric("最新章留存率", f"{retention_latest:.2f}%")
-                    col_c.metric("第一章总点击", first_chapter_click)
+                    c2.markdown(f"<div style='font-size:12px; color:#888;'>最新章留存</div><div style='font-size:16px; font-weight:bold; color:#1f77b4;'>{retention_latest:.2f}%</div>", unsafe_allow_html=True)
+                    c3.markdown(f"<div style='font-size:12px; color:#888;'>第一章点击</div><div style='font-size:16px; font-weight:bold; color:#1f77b4;'>{first_chapter_click}</div>", unsafe_allow_html=True)
+                    
+                    st.markdown("<br>", unsafe_allow_html=True)
                     
                     display_chap = latest_chap[['章节', '点击', '新增点击']].copy()
                     display_chap['累计留存率'] = (display_chap['点击'] / first_chapter_click * 100).round(2).astype(str) + '%'
-                    display_chap.columns = ['章节', '当前总点击', '本次新增点击', '相对第一章留存率']
+                    display_chap.columns = ['章节', '总点击', '本次新增', '留存率']
                     st.dataframe(display_chap, use_container_width=True, hide_index=True)
