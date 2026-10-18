@@ -11,10 +11,51 @@ from datetime import datetime, timedelta
 import time
 import concurrent.futures
 
-st.set_page_config(page_title="晋江数据监测助手", page_icon="📚", layout="wide")
-st.title("📚 晋江数据监测助手 (云端全功能版)")
+# ================= 页面基础配置 =================
+st.set_page_config(
+    page_title="晋江数据监测助手",
+    page_icon="📚",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# ================= 云端数据读写核心逻辑 =================
+# 自定义CSS美化界面
+st.markdown("""
+<style>
+    /* 全局字体 */
+    html, body, [class*="css"] { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; }
+    /* 卡片式指标 */
+    [data-testid="stMetric"] {
+        background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f2 100%);
+        border-radius: 12px;
+        padding: 15px 20px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+    [data-testid="stMetric"] label { color: #555; font-weight: 500; }
+    [data-testid="stMetric"] div { color: #1f77b4; font-weight: 700; }
+    /* 按钮圆角 */
+    .stButton > button {
+        border-radius: 8px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    .stButton > button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    /* 表格样式 */
+    [data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    /* 侧边栏美化 */
+    [data-testid="stSidebar"] { background: linear-gradient(180deg, #f8f9fa 0%, #eef2f5 100%); }
+    /* 标题渐变 */
+    h1 { background: linear-gradient(90deg, #1f77b4, #ff7f0e); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("📚 晋江数据监测助手")
+st.caption("全功能云端版 · 自动后台抓取 · 支持PC/APP/WAP全榜单")
+
+# ================= 云端读写核心 =================
 try:
     GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
     GITHUB_REPO = st.secrets["GITHUB_REPO"]
@@ -29,6 +70,7 @@ FILE_AUTHOR = "data/我的作收数据.csv"
 FILE_RANK = "data/榜单数据.csv"
 FILE_CHAPTER = "data/章节数据.csv"
 
+# 读取
 def load_df(file_path):
     if CLOUD_MODE:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
@@ -43,6 +85,7 @@ def load_df(file_path):
             except: return pd.DataFrame()
         return pd.DataFrame()
 
+# 保存
 def save_df(df, file_path):
     if CLOUD_MODE:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
@@ -50,18 +93,20 @@ def save_df(df, file_path):
         sha = r.json()["sha"] if r.status_code == 200 else None
         content = df.to_csv(index=False).encode("utf-8-sig")
         encoded = base64.b64encode(content).decode("utf-8")
-        data = {"message": "Update data", "content": encoded}
+        data = {"message": "Auto update data", "content": encoded}
         if sha: data["sha"] = sha
         requests.put(url, json=data, headers=headers)
     else:
         df.to_csv(file_path, index=False, encoding='utf-8-sig')
 
+# 追加记录
 def save_record(record_dict, file_path):
     df = load_df(file_path)
     df_new = pd.DataFrame([record_dict])
     df = pd.concat([df, df_new], ignore_index=True)
     save_df(df, file_path)
 
+# 删除
 def delete_record(id_col, target_id, file_path, source_col=None, source_val=None):
     df = load_df(file_path)
     if not df.empty:
@@ -166,15 +211,32 @@ def calculate_metrics(df, id_col, val_col):
         results.append(row_dict)
     return pd.DataFrame(results)
 
+# ================= 全榜单配置（PC/APP/WAP通用） =================
+# 来源：晋江官方榜单参数，t=0全站，其他频道ID可自行扩展
+RANK_MAP = {
+    "全站-VIP金榜": {"o": "1", "t": "0"},
+    "全站-收入金榜": {"o": "12", "t": "0"},
+    "全站-新书千字榜(夹子)": {"o": "17", "t": "0"},
+    "全站-季度排行": {"o": "2", "t": "0"},
+    "全站-完结金榜": {"o": "18", "t": "0"},
+    "言情-VIP金榜": {"o": "1", "t": "1"},
+    "纯爱-VIP金榜": {"o": "1", "t": "5"},
+    "百合-VIP金榜": {"o": "1", "t": "9"},
+    "无CP-VIP金榜": {"o": "1", "t": "13"},
+    "衍生-新书千字榜": {"o": "17", "t": "10"},
+    "言情-季度排行": {"o": "2", "t": "1"},
+    "纯爱-季度排行": {"o": "2", "t": "5"},
+}
+
 # ================= 侧边栏 =================
 with st.sidebar:
-    st.header("导航与操作")
-    app_mode = st.radio("选择页面", ["📚 书架", "🏆 榜单监控", "👤 作者专栏", "🔍 单书详情"])
+    st.header("⚙️ 控制台")
+    app_mode = st.radio("选择页面", ["📚 书架", "🏆 全榜单监控", "👤 作者专栏", "🔍 单书详情"])
     
     st.markdown("---")
-    st.subheader("➕ 添加书籍")
-    novel_id = st.text_input("输入书号(novelid)")
-    if st.button("添加并抓取"):
+    st.subheader("➕ 添加监控")
+    novel_id = st.text_input("书号 (novelid)")
+    if st.button("添加书籍", use_container_width=True):
         if novel_id:
             with st.spinner("抓取中..."):
                 info = fetch_book_data(novel_id)
@@ -182,9 +244,8 @@ with st.sidebar:
                     save_record({"记录时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **info, "来源": "手动添加"}, FILE_BOOK)
                     st.success("添加成功"); st.rerun()
     
-    st.subheader("➕ 添加作者")
-    author_id = st.text_input("输入作者ID")
-    if st.button("添加作者及全部作品"):
+    author_id = st.text_input("作者ID")
+    if st.button("添加作者及作品", use_container_width=True):
         if author_id:
             with st.spinner("解析并抓取中..."):
                 auth = fetch_author_info(author_id)
@@ -200,6 +261,26 @@ with st.sidebar:
                             df_b = load_df(FILE_BOOK)
                             save_df(pd.concat([df_b, pd.DataFrame(res)], ignore_index=True), FILE_BOOK)
                     st.success("作者添加成功"); st.rerun()
+
+    st.markdown("---")
+    st.subheader("🔄 数据管理")
+    if st.button("一键刷新全部书籍", use_container_width=True):
+        df_books_now = load_df(FILE_BOOK)
+        if not df_books_now.empty:
+            unique_books = df_books_now.drop_duplicates('书号', keep='last')
+            with st.spinner("正在重新抓取所有书籍..."):
+                for _, row in unique_books.iterrows():
+                    nid = str(row['书号'])
+                    info = fetch_book_data(nid)
+                    if info:
+                        save_record({"记录时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "书号": nid, "书名": info['书名'], "作者": info['作者'],
+                                     "收藏数": info['收藏数'], "点击数": info['点击数'], "霸王票": info['霸王票'], "来源": row['来源']}, FILE_BOOK)
+            st.success("刷新完毕！"); time.sleep(1); st.rerun()
+
+    if st.button("🚨 一键清空所有数据", use_container_width=True, type="primary"):
+        save_df(pd.DataFrame(), FILE_BOOK); save_df(pd.DataFrame(), FILE_AUTHOR)
+        save_df(pd.DataFrame(), FILE_RANK); save_df(pd.DataFrame(), FILE_CHAPTER)
+        st.success("已清空全部数据"); time.sleep(1); st.rerun()
 
 # ================= 页面 1：书架 =================
 if app_mode == "📚 书架":
@@ -219,35 +300,26 @@ if app_mode == "📚 书架":
                     col4.write(f"+{int(row['1H涨幅'])}" if row['1H涨幅'] > 0 else str(int(row['1H涨幅'])))
                     col5.write(f"+{int(row['本周涨幅'])}" if row['本周涨幅'] > 0 else str(int(row['本周涨幅'])))
                     if col6.button("❌", key=f"delb{row['书号']}"):
-                        delete_record('书号', row['书号'], FILE_BOOK)
-                        st.rerun()
+                        delete_record('书号', row['书号'], FILE_BOOK); st.rerun()
 
-# ================= 页面 2：榜单 =================
-elif app_mode == "🏆 榜单监控":
-    st.subheader("🏆 榜单实时监控")
-    RANK_MAP = {"VIP金榜": {"o": "1", "t": "0"}, "新书千字榜(夹子)": {"o": "17", "t": "0"}, "纯爱VIP": {"o": "1", "t": "5"}, "言情VIP": {"o": "1", "t": "1"}, "百合VIP": {"o": "1", "t": "9"}}
+# ================= 页面 2：全榜单监控 =================
+elif app_mode == "🏆 全榜单监控":
+    st.subheader("🏆 全榜单实时监控")
+    st.info("💡 数据由 GitHub Actions 后台每小时自动抓取并更新，无需手动操作，打开即可查看最新榜单。")
+    
     sel_rank = st.selectbox("选择榜单", list(RANK_MAP.keys()))
-    if st.button(f"抓取前20名"):
-        books = fetch_ranking_books(RANK_MAP[sel_rank]["o"], RANK_MAP[sel_rank]["t"])
-        if books:
-            def process(b):
-                inf = fetch_book_data(b['novel_id'])
-                if inf: return {"记录时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "榜单": sel_rank, **inf}
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
-                res = [r for r in ex.map(process, books) if r]
-            if res:
-                df_r = load_df(FILE_RANK)
-                save_df(pd.concat([df_r, pd.DataFrame(res)], ignore_index=True), FILE_RANK)
-                st.success("抓取成功"); st.rerun()
     
     df_rank = load_df(FILE_RANK)
     if not df_rank.empty:
         cur = df_rank[df_rank['榜单'] == sel_rank]
         if not cur.empty:
             lat = calculate_metrics(cur, '书号', '收藏数')
+            st.metric(label="榜单本周平均涨幅", value=f"{lat['本周涨幅'].mean():.2f}" if pd.notna(lat['本周涨幅'].mean()) else "0")
             st.dataframe(lat[['书名', '作者', '收藏数', '1H涨幅', '本周涨幅']].sort_values('本周涨幅', ascending=False), use_container_width=True, hide_index=True)
+        else:
+            st.info(f"暂无【{sel_rank}】的数据，后台任务运行后将自动填充。")
 
-# ================= 页面 3：作者 =================
+# ================= 页面 3：作者专栏 =================
 elif app_mode == "👤 作者专栏":
     st.subheader("👤 作者作收监控")
     df_auth = load_df(FILE_AUTHOR)
