@@ -19,15 +19,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 自定义CSS美化界面
 st.markdown("""
 <style>
     html, body, [class*="css"] { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; }
     [data-testid="stMetric"] {
         background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f2 100%);
-        border-radius: 12px;
-        padding: 15px 20px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        border-radius: 12px; padding: 15px 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);
     }
     [data-testid="stMetric"] label { color: #555; font-weight: 500; }
     [data-testid="stMetric"] div { color: #1f77b4; font-weight: 700; }
@@ -99,7 +96,7 @@ def delete_record(id_col, target_id, file_path, source_col=None, source_val=None
             df = df[df[id_col].astype(str) != str(target_id)]
         save_df(df, file_path)
 
-# ================= 爬虫模块（重点强化） =================
+# ================= 爬虫模块（暴力加强版） =================
 src_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 def fetch_book_data(novel_id):
@@ -108,7 +105,7 @@ def fetch_book_data(novel_id):
         resp = requests.get(url, headers=src_headers, timeout=10)
         resp.encoding = 'gb18030'
         soup = BeautifulSoup(resp.text, 'html.parser')
-        text_all = soup.get_text()
+        text_all = soup.get_text(separator=' ')
         
         title_tag = soup.find('h1')
         collect_tag = soup.find('span', itemprop='collectedCount')
@@ -117,24 +114,17 @@ def fetch_book_data(novel_id):
         if not title_tag or not collect_tag:
             return None
 
-        # 1. 暴力匹配点击数
         clicks = 0
-        click_match = re.search(r'总点击数[：:\s]*(\d+)', text_all)
-        if click_match:
-            clicks = int(click_match.group(1))
+        click_tag = soup.find('span', itemprop='clickCount')
+        if click_tag: 
+            clicks = int(re.sub(r'\D', '', click_tag.text))
         else:
-            click_tag = soup.find('span', itemprop='clickCount')
-            if click_tag: clicks = int(re.sub(r'\D', '', click_tag.text))
+            click_match = re.search(r'点击数[：:\s]*(\d+)', text_all)
+            if click_match: clicks = int(click_match.group(1))
 
-        # 2. 暴力匹配霸王票（兼容小数和纯数字）
         vip_ticket = 0
         vip_match = re.search(r'霸王票[：:\s]*([\d\.]+)', text_all)
-        if vip_match:
-            vip_ticket = int(float(vip_match.group(1))) # 转成整数展示，避免小数乱码
-        else:
-            # 有时页面是"霸王票总数：xx"
-            vip_match2 = re.search(r'霸王票总数[：:\s]*([\d\.]+)', text_all)
-            if vip_match2: vip_ticket = int(float(vip_match2.group(1)))
+        if vip_match: vip_ticket = int(float(vip_match.group(1)))
 
         return {
             "书号": str(novel_id), 
@@ -144,9 +134,7 @@ def fetch_book_data(novel_id):
             "点击数": clicks, 
             "霸王票": vip_ticket
         }
-    except Exception as e: 
-        print(f"抓取失败 {novel_id}: {e}")
-    return None
+    except Exception: return None
 
 def fetch_author_info(author_id):
     url = f"http://www.jjwxc.net/oneauthor.php?authorid={author_id}"
@@ -192,7 +180,7 @@ def fetch_ranking_books(orderstr, t="0"):
         return books[:20]
     except: return None
 
-# ================= 涨跌幅计算 =================
+# ================= 涨跌幅计算（修复报错） =================
 def get_current_cycle_start():
     now = datetime.now()
     days_since_thursday = (now.weekday() - 3) % 7
@@ -204,39 +192,58 @@ def get_current_cycle_start():
 def calculate_metrics(df, id_col, val_col):
     if df.empty: return df
     df = df.copy()
-    df['时间_dt'] = pd.to_datetime(df['记录时间'])
+    
+    # 强制转数字，防止字符串相减报错
+    df[val_col] = pd.to_numeric(df[val_col], errors='coerce')
+    df = df.dropna(subset=[val_col])
+    if df.empty: return df
+    
+    df['时间_dt'] = pd.to_datetime(df['记录时间'], errors='coerce')
+    df = df.dropna(subset=['时间_dt'])
     df = df.sort_values(by=[id_col, '时间_dt'])
+    
     latest_df = df.drop_duplicates(subset=[id_col], keep='last').copy()
     cycle_start = get_current_cycle_start()
     results = []
+    
     for _, row in latest_df.iterrows():
         item_id = row[id_col]; latest_time = row['时间_dt']; latest_val = row[val_col]
         hist = df[df[id_col] == item_id]
+        past_any = hist[hist['时间_dt'] < latest_time]
+        
+        # 1H 涨幅
         target_1h = latest_time - timedelta(hours=1)
         past_1h = hist[hist['时间_dt'] <= target_1h]
-        base_1h = past_1h.iloc[-1][val_col] if not past_1h.empty else hist.iloc[0][val_col]
+        if not past_1h.empty:
+            base_1h = past_1h.iloc[-1][val_col]
+        elif not past_any.empty:
+            base_1h = past_any.iloc[-1][val_col] # 没有1小时前，找最近的旧数据
+        else:
+            base_1h = None
+            
+        # 本周涨幅
         cycle_data = hist[hist['时间_dt'] >= cycle_start]
-        base_cycle = cycle_data.iloc[0][val_col] if not cycle_data.empty else hist.iloc[0][val_col]
+        if not cycle_data.empty:
+            base_cycle = cycle_data.iloc[0][val_col]
+        elif not past_any.empty:
+            base_cycle = past_any.iloc[-1][val_col]
+        else:
+            base_cycle = None
+            
         row_dict = row.to_dict()
-        row_dict['1H涨幅'] = latest_val - base_1h
-        row_dict['本周涨幅'] = latest_val - base_cycle
+        row_dict['1H涨幅'] = (latest_val - base_1h) if base_1h is not None else None
+        row_dict['本周涨幅'] = (latest_val - base_cycle) if base_cycle is not None else None
         results.append(row_dict)
+        
     return pd.DataFrame(results)
 
 # ================= 全榜单配置 =================
 RANK_MAP = {
-    "全站-VIP金榜": {"o": "1", "t": "0"},
-    "全站-收入金榜": {"o": "12", "t": "0"},
-    "全站-新书千字榜(夹子)": {"o": "17", "t": "0"},
-    "全站-季度排行": {"o": "2", "t": "0"},
-    "全站-完结金榜": {"o": "18", "t": "0"},
-    "言情-VIP金榜": {"o": "1", "t": "1"},
-    "纯爱-VIP金榜": {"o": "1", "t": "5"},
-    "百合-VIP金榜": {"o": "1", "t": "9"},
-    "无CP-VIP金榜": {"o": "1", "t": "13"},
-    "衍生-新书千字榜": {"o": "17", "t": "10"},
-    "言情-季度排行": {"o": "2", "t": "1"},
-    "纯爱-季度排行": {"o": "2", "t": "5"},
+    "全站-VIP金榜": {"o": "1", "t": "0"}, "全站-收入金榜": {"o": "12", "t": "0"},
+    "全站-新书千字榜(夹子)": {"o": "17", "t": "0"}, "全站-季度排行": {"o": "2", "t": "0"},
+    "全站-完结金榜": {"o": "18", "t": "0"}, "言情-VIP金榜": {"o": "1", "t": "1"},
+    "纯爱-VIP金榜": {"o": "1", "t": "5"}, "百合-VIP金榜": {"o": "1", "t": "9"},
+    "无CP-VIP金榜": {"o": "1", "t": "13"}, "衍生-新书千字榜": {"o": "17", "t": "10"},
 }
 
 # ================= 侧边栏 =================
@@ -254,8 +261,6 @@ with st.sidebar:
                 if info:
                     save_record({"记录时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **info, "来源": "手动添加"}, FILE_BOOK)
                     st.success("添加成功"); st.rerun()
-                else:
-                    st.error("抓取失败")
     
     author_id = st.text_input("作者ID")
     if st.button("添加作者及作品", use_container_width=True):
@@ -310,8 +315,13 @@ if app_mode == "📚 书架":
                 for _, row in latest.iterrows():
                     col1, col2, col3, col4, col5, col6 = st.columns([3, 2, 1.5, 1.5, 1.5, 1])
                     col1.write(row['书名']); col2.write(row['作者']); col3.write(row['收藏数'])
-                    col4.write(f"+{int(row['1H涨幅'])}" if row['1H涨幅'] > 0 else str(int(row['1H涨幅'])))
-                    col5.write(f"+{int(row['本周涨幅'])}" if row['本周涨幅'] > 0 else str(int(row['本周涨幅'])))
+                    
+                    g1h = row['1H涨幅']
+                    col4.write("-" if pd.isna(g1h) else (f"+{int(g1h)}" if g1h > 0 else str(int(g1h))))
+                        
+                    gw = row['本周涨幅']
+                    col5.write("-" if pd.isna(gw) else (f"+{int(gw)}" if gw > 0 else str(int(gw))))
+                        
                     if col6.button("❌", key=f"delb{row['书号']}"):
                         delete_record('书号', row['书号'], FILE_BOOK); st.rerun()
 
@@ -327,8 +337,11 @@ elif app_mode == "🏆 全榜单监控":
         cur = df_rank[df_rank['榜单'] == sel_rank]
         if not cur.empty:
             lat = calculate_metrics(cur, '书号', '收藏数')
-            st.metric(label="榜单本周平均涨幅", value=f"{lat['本周涨幅'].mean():.2f}" if pd.notna(lat['本周涨幅'].mean()) else "0")
-            st.dataframe(lat[['书名', '作者', '收藏数', '1H涨幅', '本周涨幅']].sort_values('本周涨幅', ascending=False), use_container_width=True, hide_index=True)
+            if not lat.empty:
+                st.metric(label="榜单本周平均涨幅", value=f"{lat['本周涨幅'].mean():.2f}" if pd.notna(lat['本周涨幅'].mean()) else "0")
+                st.dataframe(lat[['书名', '作者', '收藏数', '1H涨幅', '本周涨幅']].sort_values('本周涨幅', ascending=False), use_container_width=True, hide_index=True)
+            else:
+                st.info("暂无有效数据。")
         else:
             st.info(f"暂无【{sel_rank}】的数据，后台任务运行后将自动填充。")
 
@@ -338,20 +351,27 @@ elif app_mode == "👤 作者专栏":
     df_auth = load_df(FILE_AUTHOR)
     if not df_auth.empty:
         lat_a = calculate_metrics(df_auth, '作者ID', '专栏收藏数')
-        for _, row in lat_a.iterrows():
-            c1, c2, c3, c4, c5 = st.columns([3, 1.5, 1.5, 1.5, 1])
-            c1.markdown(f"**👤 {row['作者']}**"); c2.write(f"作收:{row['专栏收藏数']}")
-            c3.write(f"1H:{int(row['1H涨幅'])}"); c4.write(f"周:{int(row['本周涨幅'])}")
-            if c5.button("❌", key=f"dela{row['作者ID']}"):
-                delete_record('作者ID', row['作者ID'], FILE_AUTHOR)
-                delete_record('来源', f"作者专栏: {row['作者']}", FILE_BOOK, '来源', f"作者专栏: {row['作者']}")
-                st.rerun()
-            with st.expander("作品详情"):
-                df_b = load_df(FILE_BOOK)
-                ab = df_b[df_b['来源'] == f"作者专栏: {row['作者']}"]
-                if not ab.empty:
-                    lb = calculate_metrics(ab, '书号', '收藏数')
-                    st.dataframe(lb[['书名', '收藏数', '1H涨幅', '本周涨幅']], use_container_width=True, hide_index=True)
+        if not lat_a.empty:
+            for _, row in lat_a.iterrows():
+                c1, c2, c3, c4, c5 = st.columns([3, 1.5, 1.5, 1.5, 1])
+                c1.markdown(f"**👤 {row['作者']}**"); c2.write(f"作收:{row['专栏收藏数']}")
+                
+                g1h = row['1H涨幅']
+                c3.write(f"1H:{int(g1h)}" if pd.notna(g1h) else "1H:-")
+                
+                gw = row['本周涨幅']
+                c4.write(f"周:{int(gw)}" if pd.notna(gw) else "周:-")
+                
+                if c5.button("❌", key=f"dela{row['作者ID']}"):
+                    delete_record('作者ID', row['作者ID'], FILE_AUTHOR)
+                    delete_record('来源', f"作者专栏: {row['作者']}", FILE_BOOK, '来源', f"作者专栏: {row['作者']}")
+                    st.rerun()
+                with st.expander("作品详情"):
+                    df_b = load_df(FILE_BOOK)
+                    ab = df_b[df_b['来源'] == f"作者专栏: {row['作者']}"]
+                    if not ab.empty:
+                        lb = calculate_metrics(ab, '书号', '收藏数')
+                        st.dataframe(lb[['书名', '收藏数', '1H涨幅', '本周涨幅']], use_container_width=True, hide_index=True)
 
 # ================= 页面 4：单书详情 =================
 elif app_mode == "🔍 单书详情":
