@@ -22,9 +22,7 @@ st.set_page_config(
 # 自定义CSS美化界面
 st.markdown("""
 <style>
-    /* 全局字体 */
     html, body, [class*="css"] { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; }
-    /* 卡片式指标 */
     [data-testid="stMetric"] {
         background: linear-gradient(135deg, #f5f7fa 0%, #e4e9f2 100%);
         border-radius: 12px;
@@ -33,21 +31,10 @@ st.markdown("""
     }
     [data-testid="stMetric"] label { color: #555; font-weight: 500; }
     [data-testid="stMetric"] div { color: #1f77b4; font-weight: 700; }
-    /* 按钮圆角 */
-    .stButton > button {
-        border-radius: 8px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-    }
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    }
-    /* 表格样式 */
+    .stButton > button { border-radius: 8px; font-weight: 600; transition: all 0.3s ease; }
+    .stButton > button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
     [data-testid="stDataFrame"] { border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-    /* 侧边栏美化 */
     [data-testid="stSidebar"] { background: linear-gradient(180deg, #f8f9fa 0%, #eef2f5 100%); }
-    /* 标题渐变 */
     h1 { background: linear-gradient(90deg, #1f77b4, #ff7f0e); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; }
 </style>
 """, unsafe_allow_html=True)
@@ -70,7 +57,6 @@ FILE_AUTHOR = "data/我的作收数据.csv"
 FILE_RANK = "data/榜单数据.csv"
 FILE_CHAPTER = "data/章节数据.csv"
 
-# 读取
 def load_df(file_path):
     if CLOUD_MODE:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
@@ -85,7 +71,6 @@ def load_df(file_path):
             except: return pd.DataFrame()
         return pd.DataFrame()
 
-# 保存
 def save_df(df, file_path):
     if CLOUD_MODE:
         url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
@@ -99,14 +84,12 @@ def save_df(df, file_path):
     else:
         df.to_csv(file_path, index=False, encoding='utf-8-sig')
 
-# 追加记录
 def save_record(record_dict, file_path):
     df = load_df(file_path)
     df_new = pd.DataFrame([record_dict])
     df = pd.concat([df, df_new], ignore_index=True)
     save_df(df, file_path)
 
-# 删除
 def delete_record(id_col, target_id, file_path, source_col=None, source_val=None):
     df = load_df(file_path)
     if not df.empty:
@@ -116,7 +99,7 @@ def delete_record(id_col, target_id, file_path, source_col=None, source_val=None
             df = df[df[id_col].astype(str) != str(target_id)]
         save_df(df, file_path)
 
-# ================= 爬虫模块 =================
+# ================= 爬虫模块（重点强化） =================
 src_headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 def fetch_book_data(novel_id):
@@ -125,15 +108,44 @@ def fetch_book_data(novel_id):
         resp = requests.get(url, headers=src_headers, timeout=10)
         resp.encoding = 'gb18030'
         soup = BeautifulSoup(resp.text, 'html.parser')
-        title_tag = soup.find('h1'); collect_tag = soup.find('span', itemprop='collectedCount')
-        author_tag = soup.find('span', itemprop='author'); click_tag = soup.find('span', itemprop='clickCount')
-        vip_match = re.search(r'霸王票：.*?(\d+)', soup.get_text())
-        vip_ticket = int(vip_match.group(1)) if vip_match else 0
-        if title_tag and collect_tag:
-            return {"书号": str(novel_id), "书名": title_tag.text.strip(), "收藏数": int(collect_tag.text.strip()),
-                    "作者": author_tag.text.strip() if author_tag else "未知",
-                    "点击数": int(click_tag.text.strip()) if click_tag else 0, "霸王票": vip_ticket}
-    except: pass
+        text_all = soup.get_text()
+        
+        title_tag = soup.find('h1')
+        collect_tag = soup.find('span', itemprop='collectedCount')
+        author_tag = soup.find('span', itemprop='author')
+        
+        if not title_tag or not collect_tag:
+            return None
+
+        # 1. 暴力匹配点击数
+        clicks = 0
+        click_match = re.search(r'总点击数[：:\s]*(\d+)', text_all)
+        if click_match:
+            clicks = int(click_match.group(1))
+        else:
+            click_tag = soup.find('span', itemprop='clickCount')
+            if click_tag: clicks = int(re.sub(r'\D', '', click_tag.text))
+
+        # 2. 暴力匹配霸王票（兼容小数和纯数字）
+        vip_ticket = 0
+        vip_match = re.search(r'霸王票[：:\s]*([\d\.]+)', text_all)
+        if vip_match:
+            vip_ticket = int(float(vip_match.group(1))) # 转成整数展示，避免小数乱码
+        else:
+            # 有时页面是"霸王票总数：xx"
+            vip_match2 = re.search(r'霸王票总数[：:\s]*([\d\.]+)', text_all)
+            if vip_match2: vip_ticket = int(float(vip_match2.group(1)))
+
+        return {
+            "书号": str(novel_id), 
+            "书名": title_tag.text.strip(), 
+            "收藏数": int(collect_tag.text.strip()),
+            "作者": author_tag.text.strip() if author_tag else "未知",
+            "点击数": clicks, 
+            "霸王票": vip_ticket
+        }
+    except Exception as e: 
+        print(f"抓取失败 {novel_id}: {e}")
     return None
 
 def fetch_author_info(author_id):
@@ -211,8 +223,7 @@ def calculate_metrics(df, id_col, val_col):
         results.append(row_dict)
     return pd.DataFrame(results)
 
-# ================= 全榜单配置（PC/APP/WAP通用） =================
-# 来源：晋江官方榜单参数，t=0全站，其他频道ID可自行扩展
+# ================= 全榜单配置 =================
 RANK_MAP = {
     "全站-VIP金榜": {"o": "1", "t": "0"},
     "全站-收入金榜": {"o": "12", "t": "0"},
@@ -243,6 +254,8 @@ with st.sidebar:
                 if info:
                     save_record({"记录时间": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **info, "来源": "手动添加"}, FILE_BOOK)
                     st.success("添加成功"); st.rerun()
+                else:
+                    st.error("抓取失败")
     
     author_id = st.text_input("作者ID")
     if st.button("添加作者及作品", use_container_width=True):
@@ -305,7 +318,7 @@ if app_mode == "📚 书架":
 # ================= 页面 2：全榜单监控 =================
 elif app_mode == "🏆 全榜单监控":
     st.subheader("🏆 全榜单实时监控")
-    st.info("💡 数据由 GitHub Actions 后台每小时自动抓取并更新，无需手动操作，打开即可查看最新榜单。")
+    st.info("💡 数据由后台每小时自动抓取并更新，无需手动操作，打开即可查看最新榜单。")
     
     sel_rank = st.selectbox("选择榜单", list(RANK_MAP.keys()))
     
