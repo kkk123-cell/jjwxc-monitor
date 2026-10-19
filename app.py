@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import time
 import concurrent.futures
 
-# ================= 页面基础配置 =================
+# ================= 页面基础配置 & 高级美化 =================
 st.set_page_config(
     page_title="晋江数据监测助手",
     page_icon="📚",
@@ -19,19 +19,45 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 全局 CSS 美化 & 移动端字体缩小
+# 全局 CSS 美化（移动端适配、绿色按钮、卡片美化）
 st.markdown("""
 <style>
     html, body, [class*="css"] { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; }
-    /* 缩小表格字体，适配手机 */
-    [data-testid="stDataFrame"] { font-size: 13px !important; border-radius: 8px; }
-    [data-testid="stDataFrame"] th { font-size: 13px !important; padding: 6px !important; }
+    
+    /* 表格紧凑化 */
+    [data-testid="stDataFrame"] { font-size: 13px !important; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    [data-testid="stDataFrame"] th { font-size: 13px !important; padding: 6px !important; background-color: #f1f3f5 !important; }
     [data-testid="stDataFrame"] td { font-size: 13px !important; padding: 6px !important; }
+    
     /* 侧边栏美化 */
     [data-testid="stSidebar"] { background: #f8f9fa; }
-    /* 整体标题缩小一点 */
-    h1 { font-size: 24px !important; margin-bottom: 10px; }
-    h3 { font-size: 18px !important; }
+    
+    /* 标题 */
+    h1 { font-size: 24px !important; margin-bottom: 10px; color: #2c3e50; font-weight: 800; }
+    h3 { font-size: 18px !important; color: #34495e; }
+    
+    /* 🌟 自定义绿色按钮（专门给删除操作用） */
+    div[data-testid="stButton"] > button[kind="primary"] {
+        background-color: #20c997 !important; /* 高级薄荷绿 */
+        border-color: #20c997 !important;
+        color: white !important;
+        border-radius: 8px !important;
+        font-weight: bold;
+        transition: all 0.3s;
+    }
+    div[data-testid="stButton"] > button[kind="primary"]:hover {
+        background-color: #1ba37a !important; /* 悬浮深绿 */
+        transform: translateY(-2px);
+    }
+    
+    /* 操作卡片背景 */
+    div[data-testid="stVerticalBlock"] > div:has(> div > div > p:contains("🗑️ 删除书籍")) {
+        background-color: #fff;
+        padding: 15px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        border: 1px solid #eee;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -201,6 +227,8 @@ def calculate_metrics(df, id_col, val_col):
         
         target_1h = latest_time - timedelta(hours=1)
         past_1h = hist[hist['时间_dt'] <= target_1h]
+        
+        # 如果找不到恰好1小时的，就找最近的一条历史记录；如果连历史记录都没有，就为 None
         base_1h = past_1h.iloc[-1][val_col] if not past_1h.empty else (past_any.iloc[-1][val_col] if not past_any.empty else None)
             
         cycle_data = hist[hist['时间_dt'] >= cycle_start]
@@ -257,7 +285,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("🔄 数据管理")
-    if st.button("一键刷新全部书籍", use_container_width=True):
+    if st.button("一键刷新当前书架", use_container_width=True):
         df_books_now = load_df(FILE_BOOK)
         if not df_books_now.empty:
             unique_books = df_books_now.drop_duplicates('书号', keep='last')
@@ -284,20 +312,19 @@ if app_mode == "📚 书架":
         if not manual_df.empty:
             latest = calculate_metrics(manual_df, '书号', '收藏数')
             if not latest.empty:
-                # 格式化数据
                 view_df = latest[['书名', '作者', '收藏数', '1H涨幅', '本周涨幅']].copy()
                 view_df['1H涨幅'] = view_df['1H涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
                 view_df['本周涨幅'] = view_df['本周涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
                 
-                # 展示紧凑表格
                 st.dataframe(view_df, use_container_width=True, hide_index=True)
                 
-                # 删除操作区
-                st.markdown("##### 🗑️ 删除书籍")
+                # 卡片式删除操作区
+                st.markdown("---")
+                st.markdown("🗑️ **删除书籍**")
                 del_options = latest['书名'] + " (" + latest['书号'].astype(str) + ")"
                 sel_del = st.selectbox("选择要删除的书籍", ["请选择..."] + del_options.tolist(), label_visibility="collapsed")
                 if sel_del != "请选择...":
-                    if st.button("确认删除该书"):
+                    if st.button("✅ 确认删除该书", type="primary"):
                         del_id = sel_del.split("(")[-1].strip(")")
                         delete_record('书号', del_id, FILE_BOOK)
                         st.success("已删除"); time.sleep(1); st.rerun()
@@ -321,7 +348,7 @@ elif app_mode == "🏆 全榜单监控":
                 st.markdown(f"**本周平均涨幅**: {lat['本周涨幅'].mean():.2f}")
                 st.dataframe(view_rank, use_container_width=True, hide_index=True)
         else:
-            st.info(f"暂无【{sel_rank}】的数据。")
+            st.info(f"暂无【{sel_rank}】的数据，可能后台还在抓取。")
 
 # ================= 页面 3：作者专栏 =================
 elif app_mode == "👤 作者专栏":
@@ -330,15 +357,15 @@ elif app_mode == "👤 作者专栏":
     if not df_auth.empty:
         lat_a = calculate_metrics(df_auth, '作者ID', '专栏收藏数')
         if not lat_a.empty:
-            # 作者列表表格化
             view_auth = lat_a[['作者', '专栏收藏数', '1H涨幅', '本周涨幅']].copy()
             view_auth['1H涨幅'] = view_auth['1H涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
             view_auth['本周涨幅'] = view_auth['本周涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
             
             st.dataframe(view_auth, use_container_width=True, hide_index=True)
             
-            # 操作区（展开作品和删除）
-            st.markdown("##### 📖 查看作品与删除")
+            # 卡片式操作区
+            st.markdown("---")
+            st.markdown("📖 **作者作品与删除**")
             auth_options = lat_a['作者'] + " (" + lat_a['作者ID'].astype(str) + ")"
             sel_auth = st.selectbox("选择作者", ["请选择..."] + auth_options.tolist(), label_visibility="collapsed")
             
@@ -346,7 +373,6 @@ elif app_mode == "👤 作者专栏":
                 target_a_name = sel_auth.split(" (")[0]
                 target_a_id = sel_auth.split("(")[-1].strip(")")
                 
-                # 作品详情
                 df_b = load_df(FILE_BOOK)
                 ab = df_b[df_b['来源'] == f"作者专栏: {target_a_name}"]
                 if not ab.empty:
@@ -359,7 +385,7 @@ elif app_mode == "👤 作者专栏":
                 else:
                     st.info("该作者暂无作品数据")
                 
-                if st.button("🚨 删除该作者及所有作品", type="primary"):
+                if st.button("✅ 确认删除该作者及所有作品", type="primary"):
                     delete_record('作者ID', target_a_id, FILE_AUTHOR)
                     delete_record('来源', f"作者专栏: {target_a_name}", FILE_BOOK, '来源', f"作者专栏: {target_a_name}")
                     st.success("已删除"); time.sleep(1); st.rerun()
@@ -405,13 +431,13 @@ elif app_mode == "🔍 单书详情":
                     c1, c2, c3 = st.columns(3)
                     if len(first_3) >= 3:
                         retention_3 = (first_3[first_3['章节号'] == 3]['点击'].values[0] / first_3[first_3['章节号'] == 1]['点击'].values[0]) * 100
-                        c1.markdown(f"<div style='font-size:12px; color:#888;'>前三章留存</div><div style='font-size:16px; font-weight:bold; color:#1f77b4;'>{retention_3:.2f}%</div>", unsafe_allow_html=True)
+                        c1.markdown(f"<div style='font-size:12px; color:#888;'>前三章留存</div><div style='font-size:16px; font-weight:bold; color:#20c997;'>{retention_3:.2f}%</div>", unsafe_allow_html=True)
                     else:
-                        c1.markdown(f"<div style='font-size:12px; color:#888;'>前三章留存</div><div style='font-size:16px; font-weight:bold; color:#1f77b4;'>数据不足</div>", unsafe_allow_html=True)
+                        c1.markdown(f"<div style='font-size:12px; color:#888;'>前三章留存</div><div style='font-size:16px; font-weight:bold; color:#20c997;'>数据不足</div>", unsafe_allow_html=True)
                     
                     retention_latest = (latest_chapter['点击'] / first_chapter_click) * 100 if first_chapter_click > 0 else 0
-                    c2.markdown(f"<div style='font-size:12px; color:#888;'>最新章留存</div><div style='font-size:16px; font-weight:bold; color:#1f77b4;'>{retention_latest:.2f}%</div>", unsafe_allow_html=True)
-                    c3.markdown(f"<div style='font-size:12px; color:#888;'>第一章点击</div><div style='font-size:16px; font-weight:bold; color:#1f77b4;'>{first_chapter_click}</div>", unsafe_allow_html=True)
+                    c2.markdown(f"<div style='font-size:12px; color:#888;'>最新章留存</div><div style='font-size:16px; font-weight:bold; color:#20c997;'>{retention_latest:.2f}%</div>", unsafe_allow_html=True)
+                    c3.markdown(f"<div style='font-size:12px; color:#888;'>第一章点击</div><div style='font-size:16px; font-weight:bold; color:#20c997;'>{first_chapter_click}</div>", unsafe_allow_html=True)
                     
                     st.markdown("<br>", unsafe_allow_html=True)
                     
