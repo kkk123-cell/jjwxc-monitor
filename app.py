@@ -14,54 +14,33 @@ import concurrent.futures
 # ================= 页面基础配置 & 高级美化 =================
 st.set_page_config(
     page_title="晋江数据监测助手",
-    page_icon="📚",
+    page_icon="🍀",  # 【修改点】换成了绿色的四叶草图标
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 全局 CSS 美化（移动端适配、绿色按钮、卡片美化）
 st.markdown("""
 <style>
     html, body, [class*="css"] { font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; }
-    
-    /* 表格紧凑化 */
     [data-testid="stDataFrame"] { font-size: 13px !important; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
     [data-testid="stDataFrame"] th { font-size: 13px !important; padding: 6px !important; background-color: #f1f3f5 !important; }
     [data-testid="stDataFrame"] td { font-size: 13px !important; padding: 6px !important; }
-    
-    /* 侧边栏美化 */
     [data-testid="stSidebar"] { background: #f8f9fa; }
-    
-    /* 标题 */
     h1 { font-size: 24px !important; margin-bottom: 10px; color: #2c3e50; font-weight: 800; }
     h3 { font-size: 18px !important; color: #34495e; }
     
-    /* 🌟 自定义绿色按钮（专门给删除操作用） */
+    /* 绿色确认按钮 */
     div[data-testid="stButton"] > button[kind="primary"] {
-        background-color: #20c997 !important; /* 高级薄荷绿 */
+        background-color: #20c997 !important;
         border-color: #20c997 !important;
         color: white !important;
         border-radius: 8px !important;
         font-weight: bold;
-        transition: all 0.3s;
-    }
-    div[data-testid="stButton"] > button[kind="primary"]:hover {
-        background-color: #1ba37a !important; /* 悬浮深绿 */
-        transform: translateY(-2px);
-    }
-    
-    /* 操作卡片背景 */
-    div[data-testid="stVerticalBlock"] > div:has(> div > div > p:contains("🗑️ 删除书籍")) {
-        background-color: #fff;
-        padding: 15px;
-        border-radius: 12px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-        border: 1px solid #eee;
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📚 晋江数据监测助手")
+st.title("🍀 晋江数据监测助手")
 
 # ================= 云端读写核心 =================
 try:
@@ -101,7 +80,11 @@ def save_df(df, file_path):
         encoded = base64.b64encode(content).decode("utf-8")
         data = {"message": "Auto update data", "content": encoded}
         if sha: data["sha"] = sha
-        requests.put(url, json=data, headers=headers)
+        res = requests.put(url, json=data, headers=headers)
+        
+        # 【重要】如果写入失败，强制报错，不糊弄
+        if res.status_code not in [200, 201]:
+            st.error(f"⚠️ 数据写入 GitHub 失败！可能是 Token 失效。详情：{res.text}")
     else:
         df.to_csv(file_path, index=False, encoding='utf-8-sig')
 
@@ -228,9 +211,8 @@ def calculate_metrics(df, id_col, val_col):
         target_1h = latest_time - timedelta(hours=1)
         past_1h = hist[hist['时间_dt'] <= target_1h]
         
-        # 如果找不到恰好1小时的，就找最近的一条历史记录；如果连历史记录都没有，就为 None
+        # 只要能找到之前任何一次的数据，就算出涨幅
         base_1h = past_1h.iloc[-1][val_col] if not past_1h.empty else (past_any.iloc[-1][val_col] if not past_any.empty else None)
-            
         cycle_data = hist[hist['时间_dt'] >= cycle_start]
         base_cycle = cycle_data.iloc[0][val_col] if not cycle_data.empty else (past_any.iloc[-1][val_col] if not past_any.empty else None)
             
@@ -312,13 +294,16 @@ if app_mode == "📚 书架":
         if not manual_df.empty:
             latest = calculate_metrics(manual_df, '书号', '收藏数')
             if not latest.empty:
+                # 显示最后抓取时间
+                last_time = latest['记录时间'].max()
+                st.caption(f"⏱️ 最后抓取时间: {last_time}")
+                
                 view_df = latest[['书名', '作者', '收藏数', '1H涨幅', '本周涨幅']].copy()
                 view_df['1H涨幅'] = view_df['1H涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
                 view_df['本周涨幅'] = view_df['本周涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
                 
                 st.dataframe(view_df, use_container_width=True, hide_index=True)
                 
-                # 卡片式删除操作区
                 st.markdown("---")
                 st.markdown("🗑️ **删除书籍**")
                 del_options = latest['书名'] + " (" + latest['书号'].astype(str) + ")"
@@ -340,6 +325,9 @@ elif app_mode == "🏆 全榜单监控":
         if not cur.empty:
             lat = calculate_metrics(cur, '书号', '收藏数')
             if not lat.empty:
+                last_time = lat['记录时间'].max()
+                st.caption(f"⏱️ 最后抓取时间: {last_time}")
+                
                 view_rank = lat[['书名', '作者', '收藏数', '1H涨幅', '本周涨幅']].copy()
                 view_rank['1H涨幅'] = view_rank['1H涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
                 view_rank['本周涨幅'] = view_rank['本周涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
@@ -357,13 +345,15 @@ elif app_mode == "👤 作者专栏":
     if not df_auth.empty:
         lat_a = calculate_metrics(df_auth, '作者ID', '专栏收藏数')
         if not lat_a.empty:
+            last_time = lat_a['记录时间'].max()
+            st.caption(f"⏱️ 最后抓取时间: {last_time}")
+            
             view_auth = lat_a[['作者', '专栏收藏数', '1H涨幅', '本周涨幅']].copy()
             view_auth['1H涨幅'] = view_auth['1H涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
             view_auth['本周涨幅'] = view_auth['本周涨幅'].apply(lambda x: "-" if pd.isna(x) else (f"+{int(x)}" if x > 0 else str(int(x))))
             
             st.dataframe(view_auth, use_container_width=True, hide_index=True)
             
-            # 卡片式操作区
             st.markdown("---")
             st.markdown("📖 **作者作品与删除**")
             auth_options = lat_a['作者'] + " (" + lat_a['作者ID'].astype(str) + ")"
@@ -427,7 +417,6 @@ elif app_mode == "🔍 单书详情":
                     latest_chapter = latest_chap.iloc[-1]
                     first_chapter_click = latest_chap.iloc[0]['点击']
                     
-                    # 紧凑型数据展示
                     c1, c2, c3 = st.columns(3)
                     if len(first_3) >= 3:
                         retention_3 = (first_3[first_3['章节号'] == 3]['点击'].values[0] / first_3[first_3['章节号'] == 1]['点击'].values[0]) * 100
